@@ -1,0 +1,1 @@
+Google BigQuery storage addon for OliveWeb DataVault 2.0 module
