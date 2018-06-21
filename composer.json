@@ -1,7 +1,7 @@
 {
     "name": "lbullard/datavault2-bigquery",
     "description": "Google BigQuery Addon module for OliveWeb Framework's DataVault 2.0 Module",
-    "keywords": ["oliveweb", "datavault", "module", "addon", " bigquery"],
+    "keywords": ["oliveweb", "datavault", "module", "addon", "bigquery"],
     "license": "MIT",
     "authors": [
         {
@@ -15,5 +15,8 @@
     },
 	"require-dev": {
 		"phpunit/phpunit": "5.2.*"
+    },
+    "extra": {
+        "installer-name": "dv2bigquery"
     }
 }
