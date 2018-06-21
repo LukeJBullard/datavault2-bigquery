@@ -11,7 +11,7 @@
     /**
      * The BigQuery Addon OliveWeb Module
      */
-    class MOD_dv2_bigquery
+    class MOD_dv2bigquery
     {
         public function __construct()
         {
