@@ -48,7 +48,7 @@
             $this->m_dbHashKeys = array();
 
             //get the hash diffs from the db and cache them
-            $query = "SELECT `%s` FROM `%s.%s.%s`";
+            $query = "SELECT %s FROM [%s:%s.%s]";
             $query = sprintf($query,
                             $this->m_hashKeyFieldName,
                             $this->m_projectID, $this->m_datasetID, $this->m_tableName);
@@ -91,7 +91,7 @@
             }
 
             //delete the link from the db
-            $query = "DELETE FROM `%s.%s.%s` WHERE `%s`='%s'";
+            $query = "DELETE FROM [%s:%s.%s] WHERE %s='%s'";
             $query = sprintf($query,
                 $this->m_projectID, $this->m_datasetID, $this->m_tableName,
                 $this->m_hashKeyFieldName, $a_hash);
@@ -169,17 +169,17 @@
             );
 
             //build the query
-            $query = "SELECT `%s`,`%s`";
+            $query = "SELECT %s,%s";
 
             //add each link field into the query
             foreach (array_values($this->m_fieldMap) as $field)
             {
-                $query .= ",`%s`";
+                $query .= ",%s";
                 array_push($args, $field);
             }
 
             //finish building the query string and insert variables via vsprintf
-            $query .= " FROM `%s.%s.%s` WHERE `%s`='%s' LIMIT 1";
+            $query .= " FROM [%s:%s.%s] WHERE %s='%s' LIMIT 1";
             array_push(
                 $args,
                 $this->m_projectID, $this->m_datasetID, $this->m_tableName,

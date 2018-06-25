@@ -46,7 +46,7 @@
             $this->m_dbHashKeys = array();
 
             //get the hash keys from the db and cache them
-            $query = "SELECT `%s` FROM `%s.%s.%s`";
+            $query = "SELECT %s FROM [%s:%s.%s]";
             $query = sprintf($query,
                             $this->m_hashKeyFieldName,
                             $this->m_projectID, $this->m_datasetID, $this->m_tableName);
@@ -125,7 +125,7 @@
             }
 
             //get the hub from the db
-            $query = "SELECT `%s`,`%s`,`%s` FROM `%s.%s.%s` WHERE `%s`='%s' LIMIT 1";
+            $query = "SELECT %s,%s,%s FROM [%s:%s.%s] WHERE %s='%s' LIMIT 1";
             $query = sprintf($query,
                 $this->m_loadDateFieldName, $this->m_sourceFieldName, $this->m_dataFieldName,
                 $this->m_projectID, $this->m_datasetID, $this->m_tableName,
@@ -189,7 +189,7 @@
             }
 
             //delete the hub from the db
-            $query = "DELETE FROM `%s.%s.%s` WHERE `%s`='%s'";
+            $query = "DELETE FROM [%s:%s.%s] WHERE %s='%s'";
             $query = sprintf($query,
                 $this->m_projectID, $this->m_datasetID, $this->m_tableName,
                 $this->m_hashKeyFieldName, $a_hashKey);

@@ -48,9 +48,10 @@
             $this->m_hashDiffFieldName = $a_hashDiffFieldName;
             $this->m_hubHashFieldName = $a_hubHashFieldName;
             $this->m_bigQuery = $a_bigQueryClient;
+            $this->m_dbHashKeys = array();
 
             //get the hash diffs from the db and cache them
-            $query = "SELECT `%s`,`%s` FROM `%s.%s.%s`";
+            $query = "SELECT %s,%s FROM [%s:%s.%s]";
             $query = sprintf($query,
                             $this->m_hashDiffFieldName, $this->m_hubHashFieldName,
                             $this->m_projectID, $this->m_datasetID, $this->m_tableName);
@@ -110,17 +111,17 @@
             );
 
             //build the query
-            $query = "SELECT `%s`,`%s`,`%s`";
+            $query = "SELECT %s,%s,%s";
 
             //add each link field into the query
             foreach (array_values($this->m_fieldMap) as $field)
             {
-                $query .= ",`%s`";
+                $query .= ",%s";
                 array_push($args, $field);
             }
 
             //finish building the query string and insert variables via vsprintf
-            $query .= " FROM `%s.%s.%s` WHERE `%s`='%s'";
+            $query .= " FROM [%s:%s.%s] WHERE %s='%s'";
 
             array_push(
                 $args,
@@ -130,7 +131,7 @@
 
             if ($a_hubHash != "")
             {
-                $query .= " AND `%s`='%s'";
+                $query .= " AND %s='%s'";
                 array_push($args, $this->m_hubHashFieldName, $a_hubHash);
             }
 
@@ -200,7 +201,7 @@
             }
 
             //delete the satellite from the db
-            $query = "DELETE FROM `%s.%s.%s` WHERE `%s`='%s'";
+            $query = "DELETE FROM [%s:%s.%s] WHERE %s='%s'";
             $args = array(
                 $this->m_projectID, $this->m_datasetID, $this->m_tableName,
                 $this->m_hashDiffFieldName, $a_hash
@@ -208,7 +209,7 @@
 
             if ($a_hubHash != "")
             {
-                $query .= " AND `%s`='%s'";
+                $query .= " AND %s='%s'";
                 array_push($args, $this->m_hubHashFieldName, $a_hubHash);
             }
 
@@ -242,7 +243,7 @@
                 $this->m_loadDateFieldName => date("Y-m-d H:i:s")
             );
 
-            $data = $a_satelilte->getData();
+            $data = $a_satellite->getData();
 
             //loop through all known data columns
             foreach (array_values($this->m_fieldMap) as $field)
