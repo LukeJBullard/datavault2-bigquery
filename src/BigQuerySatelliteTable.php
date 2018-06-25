@@ -25,6 +25,7 @@
         /**
          * Constructor for BigQuerySatelliteTable
          * 
+         * @param BigQueryClient $a_bigQueryClient The BigQueryClient object to use when communicating with BigQuery
          * @param String $a_projectID The ID of the project in Google Cloud Platform
          * @param String $a_datasetID The ID of the dataset in the project
          * @param String $a_tableName The name of the BigQuery table to use.
@@ -35,7 +36,7 @@
          * @param Array $a_fieldMap An associative array. Each Key is the name of the Satellite's Data, and the Value is
          *                  the column to put the data into in datavault)
          */
-        public function __construct($a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_dateFieldName,
+        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_dateFieldName,
                                     $a_hashDiffFieldName, $a_hubHashFieldName, $a_fieldMap=array())
         {
             $this->m_projectID = $a_projectID;
@@ -46,10 +47,7 @@
             $this->m_dateFieldName = $a_dateFieldName;
             $this->m_hashDiffFieldName = $a_hashDiffFieldName;
             $this->m_hubHashFieldName = $a_hubHashFieldName;
-
-            //get the bigqueryclient instance from the googlecloud module
-            $googleCloud = Modules::getInstance()['googlecloud'];
-            $this->m_bigQuery = $googleCloud->getBigQueryClient();
+            $this->m_bigQuery = $a_bigQueryClient;
 
             //get the hash diffs from the db and cache them
             $query = "SELECT `%s`,`%s` FROM `%s.%s.%s`";

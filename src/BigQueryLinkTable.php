@@ -25,6 +25,7 @@
         /**
          * Constructor for BigQueryLinkTable
          * 
+         * @param BigQueryClient $a_bigQueryClient The BigQueryClient object to use when communicating with BigQuery
          * @param String $a_projectID The ID of the project in Google Cloud Platform
          * @param String $a_datasetID The ID of the dataset in the project
          * @param String $a_tableName The name of the DynamoDB table to store the Links in
@@ -34,8 +35,9 @@
          * @param Array $a_fieldMap An associative array. Each Key is the name of the linked hub, and the Value is the column to
          *              put the data into in the datavault)
          */
-        public function __construct($a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName, $a_fieldMap)
+        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName, $a_fieldMap)
         {
+            $this->m_bigQuery = $a_bigQueryClient;
             $this->m_projectID = $a_projectID;
             $this->m_datasetID = $a_datasetID;
             $this->m_tableName = $a_tableName;
@@ -44,10 +46,6 @@
             $this->m_hashKeyFieldName = $a_hashKeyFieldName;
             $this->m_fieldMap = $a_fieldMap;
             $this->m_dbHashKeys = array();
-
-            //get the bigqueryclient instance from the googlecloud module
-            $googleCloud = Modules::getInstance()['googlecloud'];
-            $this->m_bigQuery = $googleCloud->getBigQueryClient();
 
             //get the hash diffs from the db and cache them
             $query = "SELECT `%s` FROM `%s.%s.%s`";

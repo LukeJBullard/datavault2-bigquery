@@ -24,6 +24,7 @@
         /**
          * Constructor for BigQueryTable
          * 
+         * @param BigQueryClient $a_bigQueryClient The BigQueryClient object to use when communicating with BigQuery
          * @param String $a_projectID The ID of the project in Google Cloud Platform
          * @param String $a_datasetID The ID of the dataset in the project
          * @param String $a_tableName The name of the BigQuery table to store the Hubs in
@@ -32,8 +33,9 @@
          * @param String $a_loadDateFieldName The name of the column in the DynamoDB that stores the initial load date of the Hub
          * @param String $a_hashKeyFieldName The name of the column in the DynamoDB that stores the hash of the Hub (Primary key)
          */
-        public function __construct($a_projectID, $a_datasetID, $a_tableName, $a_dataFieldName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName)
+        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_dataFieldName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName)
         {
+            $this->m_bigQuery = $a_bigQueryClient;
             $this->m_projectID = $a_projectID;
             $this->m_datasetID = $a_datasetID;
             $this->m_tableName = $a_tableName;
@@ -42,10 +44,6 @@
             $this->m_loadDateFieldName = $a_loadDateFieldName;
             $this->m_hashKeyFieldName = $a_hashKeyFieldName;
             $this->m_dbHashKeys = array();
-
-            //get the bigqueryclient instance from the googlecloud module
-            $googleCloud = Modules::getInstance()['googlecloud'];
-            $this->m_bigQuery = $googleCloud->getBigQueryClient();
 
             //get the hash keys from the db and cache them
             $query = "SELECT `%s` FROM `%s.%s.%s`";
