@@ -247,19 +247,19 @@
                 $this->m_hashDiffFieldName => $a_satellite->getHashDiff(),
                 $this->m_sourceFieldName => $a_satellite->getSource(),
                 $this->m_hubHashFieldName => $a_satellite->getHubHash(),
-                $this->m_loadDateFieldName => date("Y-m-d H:i:s")
+                $this->m_dateFieldName => date("Y-m-d H:i:s")
             );
 
             $data = $a_satellite->getData();
 
             //loop through all known data columns
-            foreach (array_values($this->m_fieldMap) as $field)
+            foreach ($this->m_fieldMap as $codeField => $dbField)
             {
                 //if this satellite has data for the column
-                if (isset($data[$field]))
+                if (isset($data[$codeField]))
                 {
-                    //add the hash for the link to the row to insert
-                    $row[$field] = $data[$field];
+                    //add the data to the row
+                    $row[$dbField] = $data[$codeField];
                 }
             }
              
