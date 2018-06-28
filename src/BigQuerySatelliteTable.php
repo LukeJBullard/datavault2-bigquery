@@ -1,7 +1,7 @@
 <?php
     /**
-     * Data Vault 2.0 Module for OliveWeb
-     * Satellite Table backed by Google BigQuery for Storage
+     * BigQuery-backed Data Vault 2.0 Module for OliveWeb
+     * Satellite Table backed by Google BigQuery for Storage and a Redis Database for Quick Indexing
      * 
      * @author Luke Bullard
      */
@@ -20,6 +20,8 @@
         private $m_hashDiffFieldName;
         private $m_hubHashFieldName;
         protected $m_bigQuery;
+        protected $m_redis;
+        protected $m_redisDb;
         protected $m_dbHashKeys;
 
         /**
@@ -35,9 +37,11 @@
          * @param String $a_hubHashFieldName The column in the database to put the hash of the Hub the Satellite is linked to.
          * @param Array $a_fieldMap An associative array. Each Key is the name of the Satellite's Data, and the Value is
          *                  the column to put the data into in datavault)
+         * @param Redis|Boolean $a_redis The already connected (and database already selected) Redis instance, or Boolean False to not use Redis
+         * @param Int $a_redisDb The Redis DB number associated with this table. Defaults to 0
          */
         public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_dateFieldName,
-                                    $a_hashDiffFieldName, $a_hubHashFieldName, $a_fieldMap=array())
+                                    $a_hashDiffFieldName, $a_hubHashFieldName, $a_fieldMap = array(), $a_redis = false, $a_redisDb = 0)
         {
             $this->m_projectID = $a_projectID;
             $this->m_datasetID = $a_datasetID;
@@ -48,27 +52,34 @@
             $this->m_hashDiffFieldName = $a_hashDiffFieldName;
             $this->m_hubHashFieldName = $a_hubHashFieldName;
             $this->m_bigQuery = $a_bigQueryClient;
-            $this->m_dbHashKeys = array();
+            $this->m_redis = $a_redis;
+            $this->m_redisDb = $a_redisDb;
 
-            //get the hash diffs from the db and cache them
-            $query = "SELECT %s,%s FROM [%s:%s.%s]";
-            $query = sprintf($query,
-                            $this->m_hashDiffFieldName, $this->m_hubHashFieldName,
-                            $this->m_projectID, $this->m_datasetID, $this->m_tableName);
-
-            $hashTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
-
-            //loop through each returned row and store the hashkey in the list
-            foreach ($hashTable as $row)
+            //if redis is not being used
+            if ($this->m_redis == false)
             {
-                if (isset($row[$this->m_hashDiffFieldName], $row[$this->m_hubHashFieldName]))
+                $this->m_dbHashKeys = array();
+
+                //get the hash diffs from the db and cache them
+                $query = "SELECT %s,%s FROM [%s:%s.%s]";
+                $query = sprintf($query,
+                                $this->m_hashDiffFieldName, $this->m_hubHashFieldName,
+                                $this->m_projectID, $this->m_datasetID, $this->m_tableName);
+
+                $hashTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
+
+                //loop through each returned row and store the hashkey in the list
+                foreach ($hashTable as $row)
                 {
-                    //if the hub hash array for this hash diff has not been created yet
-                    if (!isset($this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]]))
+                    if (isset($row[$this->m_hashDiffFieldName], $row[$this->m_hubHashFieldName]))
                     {
-                        $this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]] = array();
+                        //if the hub hash array for this hash diff has not been created yet
+                        if (!isset($this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]]))
+                        {
+                            $this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]] = array();
+                        }
+                        array_push($this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]], $row[$this->m_hubHashFieldName]);
                     }
-                    array_push($this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]], $row[$this->m_hubHashFieldName]);
                 }
             }
         }
@@ -78,21 +89,38 @@
          * 
          * @param String $a_hashDiff The Hash Diff of the Satellite.
          * @param String $a_hubHash The Hash of the Hub the Satellite is under. (Optional- if omitted, will search for the first Satellite with the hash diff)
-         * @return Boolean If the Satellite exists.
+         * @return Boolean|Int Boolean True/False if the Satellite exists, or DV2_ERROR if an error occurred.
          */
         public function satelliteExists($a_hashDiff, $a_hubHash="")
         {
-            if ($a_hubHash == "")
+            //if redis is not being used
+            if ($this->m_redis == false)
             {
-                return array_key_exists($a_hashDiff, $this->m_dbHashKeys);
+                if ($a_hubHash == "")
+                {
+                    return array_key_exists($a_hashDiff, $this->m_dbHashKeys);
+                }
+
+                if (array_key_exists($a_hashDiff, $this->m_dbHashKeys))
+                {
+                    return in_array($a_hubHash, $this->m_dbHashKeys[$a_hashDiff]);
+                }
+                
+                return false;
             }
 
-            if (array_key_exists($a_hashDiff, $this->m_dbHashKeys))
+            //redis is being used
+            if (!$this->m_redis->select($this->m_redisDb))
             {
-                return in_array($a_hubHash, $this->m_dbHashKeys[$a_hashDiff]);
+                return DV2_ERROR;
             }
-            
-            return false;
+
+            if ($a_hubHash == "")
+            {
+                return $this->m_redis->exists($a_hashDiff) > 0;
+            }
+
+            return $this->m_redis->sIsMember($a_hashDiff, $a_hubHash);
         }
 
         /**
@@ -202,7 +230,7 @@
         public function clearSatellite($a_hashDiff, $a_hubHash="")
         {
             //if the satellite doesn't exist anyways, return success
-            if (!$this->satelliteExists($a_hash, $a_hubHash))
+            if (!$this->satelliteExists($a_hashDiff, $a_hubHash))
             {
                 return DV2_SUCCESS;
             }
@@ -211,7 +239,7 @@
             $query = "DELETE FROM [%s:%s.%s] WHERE %s='%s'";
             $args = array(
                 $this->m_projectID, $this->m_datasetID, $this->m_tableName,
-                $this->m_hashDiffFieldName, $a_hash
+                $this->m_hashDiffFieldName, $a_hashDiff
             );
 
             if ($a_hubHash != "")
@@ -224,8 +252,20 @@
 
             $satelliteTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
 
-            unset($this->m_dbHashKeys[$a_hash]);
+            //if redis is not being used
+            if ($this->m_redis == false)
+            {
+                unset($this->m_dbHashKeys[$a_hashDiff]);
+                return DV2_SUCCESS;
+            }
 
+            //redis is being used
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+
+            $this->m_redis->unlink($a_hashDiff);
             return DV2_SUCCESS;
         }
 
@@ -266,15 +306,32 @@
             //insert the satellite into the db
             $result = $this->m_bigQuery->dataset($this->m_datasetID)->table($this->m_tableName)->insertRow($row, array("insertId" => $a_satellite->getHashDiff() . $a_satellite->getHubHash()));
             
-            //add the satellite to the cache
-            //if the hub array for this hash diff is not already added to the cache, add it
-            if (!isset($this->m_dbHashKeys[$a_satellite->getHashDiff()]))
+            //add the satellite to the cache/redis
+            //if redis is not being used
+            if ($this->m_redis == false)
             {
-                $this->m_dbHashKeys[$a_satellite->getHashDiff()] = array();
+                //if the hub array for this hash diff is not already added to the cache, add it
+                if (!isset($this->m_dbHashKeys[$a_satellite->getHashDiff()]))
+                {
+                    $this->m_dbHashKeys[$a_satellite->getHashDiff()] = array();
+                }
+                array_push($this->m_dbHashKeys[$a_satellite->getHashDiff()], $a_satellite->getHubHash());
+                return DV2_SUCCESS;
             }
-            array_push($this->m_dbHashKeys[$a_satellite->getHashDiff()], $a_satellite->getHubHash());
 
-            return DV2_SUCCESS;
+            //redis is being used
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+            
+            $redisResult = $this->m_redis->sAdd($a_satellite->getHashDiff(), $a_satellite->getHubHash());
+            if ($redisResult == false || $redisResult > 0)
+            {
+                return DV2_SUCCESS;
+            }
+
+            return DV2_ERROR;
         }
     }
 ?>

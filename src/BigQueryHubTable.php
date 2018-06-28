@@ -1,7 +1,7 @@
 <?php
     /**
      * BigQuery-backed DataVault 2.0 Module for OliveWeb
-     * Hub Table backed by Google BigQuery for Storage
+     * Hub Table backed by Google BigQuery for Storage and a Redis Database for Quick Indexing
      * 
      * @author Luke Bullard
      */
@@ -19,6 +19,8 @@
         private $m_loadDateFieldName;
         private $m_hashKeyFieldName;
         protected $m_bigQuery;
+        protected $m_redis;
+        protected $m_redisDb;
         protected $m_dbHashKeys;
 
         /**
@@ -32,8 +34,10 @@
          * @param String $a_sourceFieldName The name of the column in the DynamoDB that stores the initial source of the Hub
          * @param String $a_loadDateFieldName The name of the column in the DynamoDB that stores the initial load date of the Hub
          * @param String $a_hashKeyFieldName The name of the column in the DynamoDB that stores the hash of the Hub (Primary key)
+         * @param Redis|Boolean $a_redis The already connected (and database already selected) Redis instance, or Boolean False to not use Redis
+         * @param Int $a_redisDb The Redis DB number associated with this table. Defaults to 0
          */
-        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_dataFieldName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName)
+        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_dataFieldName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName, $a_redis = false, $a_redisDb = 0)
         {
             $this->m_bigQuery = $a_bigQueryClient;
             $this->m_projectID = $a_projectID;
@@ -43,22 +47,29 @@
             $this->m_sourceFieldName = $a_sourceFieldName;
             $this->m_loadDateFieldName = $a_loadDateFieldName;
             $this->m_hashKeyFieldName = $a_hashKeyFieldName;
-            $this->m_dbHashKeys = array();
+            $this->m_redis = $a_redis;
+            $this->m_redisDb = $a_redisDb;
 
-            //get the hash keys from the db and cache them
-            $query = "SELECT %s FROM [%s:%s.%s]";
-            $query = sprintf($query,
-                            $this->m_hashKeyFieldName,
-                            $this->m_projectID, $this->m_datasetID, $this->m_tableName);
-
-            $hashTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
-
-            //loop through each returned row and store the hashkey in the list
-            foreach ($hashTable as $row)
+            //if redis is not being used
+            if ($this->m_redis == false)
             {
-                if (isset($row[$this->m_hashKeyFieldName]))
+                $this->m_dbHashKeys = array();
+
+                //get the hash keys from the db and cache them
+                $query = "SELECT %s FROM [%s:%s.%s]";
+                $query = sprintf($query,
+                                $this->m_hashKeyFieldName,
+                                $this->m_projectID, $this->m_datasetID, $this->m_tableName);
+
+                $hashTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
+
+                //loop through each returned row and store the hashkey in the list
+                foreach ($hashTable as $row)
                 {
-                   $this->m_dbHashKeys[$row[$this->m_hashKeyFieldName]] = true;
+                    if (isset($row[$this->m_hashKeyFieldName]))
+                    {
+                        $this->m_dbHashKeys[$row[$this->m_hashKeyFieldName]] = true;
+                    }
                 }
             }
         }
@@ -88,11 +99,23 @@
             //insert the row
             $result = $this->m_bigQuery->dataset($this->m_datasetID)->table($this->m_tableName)->insertRow($row, array("insertId" => $a_hub->getHashKey()));
 
-            //add the hash to the cache if successful
+            //add the hash to the cache/redis if successful
             if ($result->isSuccessful())
             {
-                $this->m_dbHashKeys[$a_hub->getHashKey()] = true;
-                return DV2_SUCCESS;
+                //if redis is not being used
+                if ($this->m_redis == false)
+                {
+                    $this->m_dbHashKeys[$a_hub->getHashKey()] = true;
+                    return DV2_SUCCESS;
+                }
+
+                //redis is being used
+                if (!$this->m_redis->select($this->m_redisDb))
+                {
+                    return DV2_ERROR;
+                }
+
+                return ($this->m_redis->set($a_hub->getHashKey(), "y") ? DV2_SUCCESS : DV2_ERROR);
             }
 
             //not successful, return error
@@ -103,11 +126,23 @@
          * Retrieves if the hub already exists in the database
          * 
          * @param String $a_hashKey The Hash of the hub to look for
-         * @return Boolean If the hub exists
+         * @return Boolean|Int Boolean if the hub exists or not, or DV2_ERROR if an error occurred
          */
         public function hubExists($a_hashKey)
         {
-            return array_key_exists($a_hashKey, $this->m_dbHashKeys);
+            //if redis is not being used
+            if ($this->m_redis == false)
+            {
+                return array_key_exists($a_hashKey, $this->m_dbHashKeys);
+            }
+
+            //redis is being used
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+
+            return $this->m_redis->exists($a_hashKey) > 0;
         }
 
         /**
@@ -196,8 +231,20 @@
 
             $hubTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
 
-            unset($this->m_dbHashKeys[$a_hashKey]);
+            //if redis is not being used
+            if ($this->m_redis == false)
+            {
+                unset($this->m_dbHashKeys[$a_hashKey]);
+                return DV2_SUCCESS;
+            }
 
+            //redis is being used, delete from redis
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+
+            $this->m_redis->unlink($a_hashKey);
             return DV2_SUCCESS;
         }
     }

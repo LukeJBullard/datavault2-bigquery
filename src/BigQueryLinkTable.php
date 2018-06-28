@@ -1,7 +1,7 @@
 <?php
     /**
-     * DataVault 2.0 module for OliveWeb
-     * A Link Table backed by Google BigQuery for Storage
+     * BigQuery-backed DataVault 2.0 module for OliveWeb
+     * A Link Table backed by Google BigQuery for Storage and a Redis Database for Quick Indexing
      * 
      * @author Luke Bullard
      */
@@ -19,6 +19,8 @@
         private $m_loadDateFieldName;
         private $m_fieldMap;
         protected $m_bigQuery;
+        protected $m_redis;
+        protected $m_redisDb;
         protected $m_dbHashKeys;
         
 
@@ -34,8 +36,10 @@
          * @param String $a_hashKeyFieldName The name of the column in the DynamoDB that stores the hash of the Link (Primary key)
          * @param Array $a_fieldMap An associative array. Each Key is the name of the linked hub, and the Value is the column to
          *              put the data into in the datavault)
+         * @param Redis|Boolean $a_redis The already connected (and database already selected) Redis instance, or Boolean False to not use Redis
+         * @param Int $a_redisDb The Redis DB number associated with this table. Defaults to 0
          */
-        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName, $a_fieldMap)
+        public function __construct($a_bigQueryClient, $a_projectID, $a_datasetID, $a_tableName, $a_sourceFieldName, $a_loadDateFieldName, $a_hashKeyFieldName, $a_fieldMap, $a_redis = false, $a_redisDb = 0)
         {
             $this->m_bigQuery = $a_bigQueryClient;
             $this->m_projectID = $a_projectID;
@@ -45,22 +49,29 @@
             $this->m_loadDateFieldName = $a_loadDateFieldName;
             $this->m_hashKeyFieldName = $a_hashKeyFieldName;
             $this->m_fieldMap = $a_fieldMap;
-            $this->m_dbHashKeys = array();
+            $this->m_redis = $a_redis;
+            $this->m_redisDb = $a_redisDb;
 
-            //get the hash diffs from the db and cache them
-            $query = "SELECT %s FROM [%s:%s.%s]";
-            $query = sprintf($query,
-                            $this->m_hashKeyFieldName,
-                            $this->m_projectID, $this->m_datasetID, $this->m_tableName);
-
-            $hashTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
-
-            //loop through each returned row and store the hashkey in the list
-            foreach ($hashTable as $row)
+            //if redis is not being used
+            if ($this->m_redis == false)
             {
-                if (isset($row[$this->m_hashKeyFieldName]))
+                $this->m_dbHashKeys = array();
+
+                //get the hash diffs from the db and cache them
+                $query = "SELECT %s FROM [%s:%s.%s]";
+                $query = sprintf($query,
+                                $this->m_hashKeyFieldName,
+                                $this->m_projectID, $this->m_datasetID, $this->m_tableName);
+
+                $hashTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
+
+                //loop through each returned row and store the hashkey in the list
+                foreach ($hashTable as $row)
                 {
-                   $this->m_dbHashKeys[$row[$this->m_hashKeyFieldName]] = true;
+                    if (isset($row[$this->m_hashKeyFieldName]))
+                    {
+                        $this->m_dbHashKeys[$row[$this->m_hashKeyFieldName]] = true;
+                    }
                 }
             }
         }
@@ -69,11 +80,22 @@
          * Retrieves if a link exists in the Table
          * 
          * @param String $a_hash The hash of the link to search for.
-         * @return Boolean If the hash exists
+         * @return Boolean|Int Boolean if the link exists or not, or DV2_ERROR if an error occurred
          */
         public function linkExists($a_hash)
         {
-            return array_key_exists($a_hash, $this->m_dbHashKeys);
+            //if redis is not being used
+            if ($this->m_redis == false)
+            {
+                return array_key_exists($a_hash, $this->m_dbHashKeys);
+            }
+
+            //redis is being used
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+            return $this->m_redis->exists($a_hash) > 0;
         }
 
         /**
@@ -98,8 +120,21 @@
 
             $linkTable = DV2_BigQuery_Utility::runQuery($this->m_bigQuery, $query, true);
 
-            unset($this->m_dbHashKeys[$a_hashKey]);
+            //if redis is not being used
+            if ($this->m_redis == false)
+            {
+                unset($this->m_dbHashKeys[$a_hashKey]);
+                return DV2_SUCCESS;
+            }
 
+            //redis is being used, delete the key from Redis
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+
+            //use unlink over del, as unlink is non-blocking
+            $this->m_redis->unlink($a_hashKey);
             return DV2_SUCCESS;
         }
 
@@ -145,6 +180,20 @@
             //insert the row into the db
             $result = $this->m_bigQuery->dataset($this->m_datasetID)->table($this->m_tableName)->insertRow($row, array("insertId" => $a_link->getHashKey()));
 
+            //if redis is not being used
+            if ($this->m_redis == false)
+            {
+                $this->m_dbHashKeys[$a_link->getHashKey()] = true;
+                return DV2_SUCCESS;
+            }
+
+            //redis is being used. store the key in redis
+            if (!$this->m_redis->select($this->m_redisDb))
+            {
+                return DV2_ERROR;
+            }
+
+            $this->m_redis->set($a_link->getHashKey(), "y");
             return DV2_SUCCESS;
         }
 
