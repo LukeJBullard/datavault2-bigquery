@@ -61,9 +61,14 @@
             //loop through each returned row and store the hashkey in the list
             foreach ($hashTable as $row)
             {
-                if (isset($row[$this->m_hashDiffFieldName], $this->m_hubHashFieldName))
+                if (isset($row[$this->m_hashDiffFieldName], $row[$this->m_hubHashFieldName]))
                 {
-                   $this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]] = array($row[$this->m_hubHashFieldName]);
+                    //if the hub hash array for this hash diff has not been created yet
+                    if (!isset($this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]]))
+                    {
+                        $this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]] = array();
+                    }
+                    array_push($this->m_dbHashKeys[$row[$this->m_hashDiffFieldName]], $row[$this->m_hubHashFieldName]);
                 }
             }
         }
@@ -86,6 +91,8 @@
             {
                 return in_array($a_hubHash, $this->m_dbHashKeys[$a_hashDiff]);
             }
+            
+            return false;
         }
 
         /**
@@ -258,6 +265,14 @@
              
             //insert the satellite into the db
             $result = $this->m_bigQuery->dataset($this->m_datasetID)->table($this->m_tableName)->insertRow($row, array("insertId" => $a_satellite->getHashDiff() . $a_satellite->getHubHash()));
+            
+            //add the satellite to the cache
+            //if the hub array for this hash diff is not already added to the cache, add it
+            if (!isset($this->m_dbHashKeys[$a_satellite->getHashDiff()]))
+            {
+                $this->m_dbHashKeys[$a_satellite->getHashDiff()] = array();
+            }
+            array_push($this->m_dbHashKeys[$a_satellite->getHashDiff()], $a_satellite->getHubHash());
 
             return DV2_SUCCESS;
         }
